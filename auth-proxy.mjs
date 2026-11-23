@@ -1,5 +1,6 @@
 // Minimal auth gate in front of supergateway.
-// Any request without the correct x-mcp-token header is rejected with 401.
+// Accepts either "Authorization: Bearer <PROXY_TOKEN>" (standard MCP client auth)
+// or the custom "x-mcp-token: <PROXY_TOKEN>" header. 401 otherwise.
 // GET /health answers 200 without auth, for platform health checks.
 import http from 'node:http';
 import proxyPkg from 'http-proxy';
@@ -22,14 +23,24 @@ proxy.on('error', (err, req, res) => {
   res.end(JSON.stringify({ error: 'upstream unavailable', detail: String(err && err.message) }));
 });
 
+function authorized(req) {
+  const auth = req.headers['authorization'] || '';
+  if (auth === 'Bearer ' + TOKEN) return true;
+  if (req.headers['x-mcp-token'] === TOKEN) return true;
+  return false;
+}
+
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
     return;
   }
-  if (req.headers['x-mcp-token'] !== TOKEN) {
-    res.writeHead(401, { 'content-type': 'application/json' });
+  if (!authorized(req)) {
+    res.writeHead(401, {
+      'content-type': 'application/json',
+      'www-authenticate': 'Bearer realm="fastmail-mcp"',
+    });
     res.end(JSON.stringify({ error: 'unauthorized' }));
     return;
   }
