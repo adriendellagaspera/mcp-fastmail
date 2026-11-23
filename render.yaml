@@ -5,7 +5,7 @@ services:
     plan: free
     branch: deploy-koyeb
     autoDeploy: true
-    healthCheckPath: /mcp
+    healthCheckPath: /health
     envVars:
       - key: FASTMAIL_API_TOKEN
         sync: false
