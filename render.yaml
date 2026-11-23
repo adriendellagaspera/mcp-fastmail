@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: fastmail-mcp
+    runtime: docker
+    plan: free
+    branch: deploy-koyeb
+    autoDeploy: true
+    healthCheckPath: /mcp
+    envVars:
+      - key: FASTMAIL_API_TOKEN
+        sync: false
+      - key: PROXY_TOKEN
+        sync: false
+      # Optional safety net for the first deployments
+      # - key: FASTMAIL_READ_ONLY
+      #   value: "1"
+      # - key: FASTMAIL_BULK_CONFIRM_THRESHOLD
+      #   value: "25"
