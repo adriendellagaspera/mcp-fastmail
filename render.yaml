@@ -7,14 +7,14 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     envVars:
-      - key: FASTMAIL_API_TOKEN
+      # Multi-account configuration, one gateway per entry:
+      #   [{"label":"adrien","proxyToken":"<hex>","apiToken":"<jmap>"}, ...]
+      # When unset, falls back to the single-account secrets below.
+      - key: FASTMAIL_ACCOUNTS
         sync: false
       - key: PROXY_TOKEN
         sync: false
-      # Second Fastmail account (gateway B): enable BOTH secrets to activate
-      - key: FASTMAIL_API_TOKEN_WIFE
-        sync: false
-      - key: PROXY_TOKEN_WIFE
+      - key: FASTMAIL_API_TOKEN
         sync: false
       # Opt-in: one child process per MCP session instead of one per request
       # - key: STATEFUL

@@ -1,54 +1,61 @@
-// Minimal auth gate in front of one or two supergateways, one per Fastmail
-// account. Each client token routes to the gateway holding that account's
-// JMAP token:
-//   PROXY_TOKEN (or PROXY_TOKEN_ADRIEN) -> gateway A (8807), Adrien
-//   PROXY_TOKEN_WIFE                    -> gateway B (8808), wife
-// Accepts "Authorization: Bearer <token>" (standard MCP client auth) or the
-// custom "x-mcp-token: <token>" header. 401 otherwise.
-// GET /health answers 200 without auth, for platform health checks.
+// Minimal auth gate in front of one supergateway per Fastmail account.
+// The token a client presents (Authorization: Bearer or x-mcp-token)
+// selects the account, hence the gateway and the JMAP token behind it.
+// Configuration lives in FASTMAIL_ACCOUNTS (see accounts.mjs), or the
+// legacy single-account secrets. GET /health answers 200 without auth.
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import proxyPkg from 'http-proxy';
+import { readAccounts, portOf } from './accounts.mjs';
 
 const { createProxyServer } = proxyPkg;
 
 const PORT = Number(process.env.PORT) || 8000;
-const GATEWAY_A = Number(process.env.GATEWAY_A_PORT) || 8807;
-const GATEWAY_B = Number(process.env.GATEWAY_B_PORT) || 8808;
-
-const TOKEN_A = process.env.PROXY_TOKEN || process.env.PROXY_TOKEN_ADRIEN;
-const TOKEN_B = process.env.PROXY_TOKEN_WIFE;
-const WIFE_ACCOUNT_ENABLED = Boolean(process.env.FASTMAIL_API_TOKEN_WIFE);
 const STATEFUL = process.env.STATEFUL === '1';
 
-const routes = [];
-if (TOKEN_A) routes.push({ token: TOKEN_A, port: GATEWAY_A, label: 'adrien' });
-if (TOKEN_B && WIFE_ACCOUNT_ENABLED)
-  routes.push({ token: TOKEN_B, port: GATEWAY_B, label: 'wife' });
-else if (TOKEN_B || WIFE_ACCOUNT_ENABLED)
+let accounts;
+try {
+  accounts = readAccounts();
+} catch (err) {
+  console.error('FATAL (auth proxy): ' + err.message);
+  process.exit(1);
+}
+if (accounts.length === 0) {
   console.error(
-    'WARN: second account needs BOTH PROXY_TOKEN_WIFE and ' +
-      'FASTMAIL_API_TOKEN_WIFE; the wife route is disabled until then',
-  );
-
-if (routes.length === 0) {
-  console.error(
-    'FATAL: no proxy token configured (PROXY_TOKEN). ' +
-      'Refusing to start exposed without auth.',
+    'FATAL: no account configured. Refusing to start exposed without auth.',
   );
   process.exit(1);
 }
 
+const routes = accounts.map((a, i) => ({
+  label: a.label,
+  token: a.proxyToken,
+  port: portOf(i),
+}));
+
 const proxy = createProxyServer();
 
 proxy.on('error', (err, req, res) => {
-  if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ error: 'upstream unavailable', detail: String(err && err.message) }));
+  if (!res.headersSent)
+    res.writeHead(502, { 'content-type': 'application/json' });
+  res.end(
+    JSON.stringify({
+      error: 'upstream unavailable',
+      detail: String(err && err.message),
+    }),
+  );
 });
+
+function sameToken(a, b) {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
 
 function tokenOf(req) {
   const auth = req.headers['authorization'] || '';
   if (auth.startsWith('Bearer ')) return auth.slice('Bearer '.length);
-  if (typeof req.headers['x-mcp-token'] === 'string') return req.headers['x-mcp-token'];
+  if (typeof req.headers['x-mcp-token'] === 'string')
+    return req.headers['x-mcp-token'];
   return undefined;
 }
 
@@ -65,7 +72,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   const token = tokenOf(req);
-  const route = token && routes.find((r) => r.token === token);
+  const route = token && routes.find((r) => sameToken(token, r.token));
   if (!route) {
     res.writeHead(401, {
       'content-type': 'application/json',

@@ -1,19 +1,23 @@
 // Babysitter: detect WEDGED supergateways (alive but not answering MCP
-// requests) and kill them, so the shell watchdogs can restart them cleanly.
-// Probes every configured gateway with a full MCP initialize. In stateful mode
-// the response carries Mcp-Session-Id: we DELETE that session right away so
-// the probe's child process never lingers, and the probe session never counts
-// toward the gateway's session timeout backlog.
+// requests) and kill them, so the supervisor in gateways.mjs restarts them.
+// Probes every configured account gateway with a full MCP initialize. In
+// stateful mode the response carries Mcp-Session-Id: we DELETE that session
+// right away so the probe's child process never lingers.
 import http from 'node:http';
 import { exec } from 'node:child_process';
-
-const PORTS = [Number(process.env.GATEWAY_A_PORT) || 8807];
-if (process.env.FASTMAIL_API_TOKEN_WIFE)
-  PORTS.push(Number(process.env.GATEWAY_B_PORT) || 8808);
+import { readAccounts, portOf } from './accounts.mjs';
 
 const TIMEOUT = 10000;
 const INTERVAL = 30000;
 const MAX_FAILURES = 2;
+
+let ports;
+try {
+  ports = readAccounts().map((a, i) => portOf(i));
+} catch (err) {
+  console.error('FATAL (babysitter): ' + err.message);
+  process.exit(1);
+}
 
 const failures = new Map();
 
@@ -64,16 +68,22 @@ function probe(port) {
 
 async function loop() {
   for (;;) {
-    for (const port of PORTS) {
+    for (const port of ports) {
       const ok = await probe(port);
       if (ok) {
         failures.set(port, 0);
       } else {
         const n = (failures.get(port) || 0) + 1;
         failures.set(port, n);
-        console.error('[babysitter] probe :' + port + ' failed (' + n + '/' + MAX_FAILURES + ')');
+        console.error(
+          '[babysitter] probe :' + port + ' failed (' + n + '/' +
+            MAX_FAILURES + ')',
+        );
         if (n >= MAX_FAILURES) {
-          console.error('[babysitter] gateway on :' + port + ' wedged, killing all gateways (watchdogs will restart)');
+          console.error(
+            '[babysitter] gateway on :' + port +
+              ' wedged, killing all gateways (supervisor will restart)',
+          );
           exec('pkill -f supergateway || true');
           failures.set(port, 0);
         }
