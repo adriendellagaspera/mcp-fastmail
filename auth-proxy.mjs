@@ -2,7 +2,9 @@
 // Any request without the correct x-mcp-token header is rejected with 401.
 // GET /health answers 200 without auth, for platform health checks.
 import http from 'node:http';
-import { createProxyServer } from 'http-proxy';
+import proxyPkg from 'http-proxy';
+
+const { createProxyServer } = proxyPkg;
 
 const PORT = Number(process.env.PORT) || 8000;
 const UPSTREAM = process.env.UPSTREAM_PORT || 8807;
